@@ -1,0 +1,47 @@
+name: Release
+
+# 推 v* 標籤（例如 v1.0.0）時：跑測試 → 用固定金鑰簽署 APK → 發布到 GitHub Releases，Obtainium 會抓到新版
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: 還原簽署金鑰
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > keystore/release.jks
+
+      - name: 測試並編譯
+        env:
+          KEYSTORE_PATH: keystore/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease -PappVersionName="$VERSION"
+          cp app/build/outputs/apk/release/app-release.apk "flex-pomodoro-${GITHUB_REF_NAME}.apk"
+
+      - name: 發布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "flex-pomodoro-${GITHUB_REF_NAME}.apk" \
+            --title "$GITHUB_REF_NAME" --generate-notes
