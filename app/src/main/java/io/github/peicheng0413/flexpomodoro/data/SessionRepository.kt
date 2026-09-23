@@ -49,10 +49,10 @@ class SessionRepository(
     private suspend fun <T> locked(block: suspend () -> T): T =
         mutex.withLock { db.withTransaction { block() } }
 
-    suspend fun start(name: String, ratio: Int, now: Long = System.currentTimeMillis()) = locked {
+    suspend fun start(name: String, breakPercent: Int, now: Long = System.currentTimeMillis()) = locked {
         if (dao.getActive() != null) return@locked
         val id = UUID.randomUUID().toString()
-        dao.insertSession(SessionEntity(id = id, name = name.trim(), ratio = ratio, startedAt = now))
+        dao.insertSession(SessionEntity(id = id, name = name.trim(), breakPercent = breakPercent, startedAt = now))
         dao.insertSegment(SegmentEntity(sessionId = id, type = SegmentType.WORK, round = 1, start = now))
     }
 
@@ -68,7 +68,7 @@ class SessionRepository(
 
     suspend fun takeBreak(now: Long = System.currentTimeMillis()) =
         transition(Phase.WORKING, Phase.PAUSED) { s ->
-            val allowance = breakAllowance(s.workMs(now), s.session.ratio)
+            val allowance = breakAllowance(s.workMs(now), s.session.breakPercent)
             close(s, now)
             open(s, SegmentType.BREAK, s.round, now, allowance)
         }

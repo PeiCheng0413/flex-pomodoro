@@ -26,14 +26,14 @@ class JsonBackup(private val db: AppDatabase) {
             .put("version", 1)
             .put("exportedAt", System.currentTimeMillis())
             .put("templates", JSONArray().apply {
-                templates.getAll().forEach { put(JSONObject().put("name", it.name).put("ratio", it.ratio)) }
+                templates.getAll().forEach { put(JSONObject().put("name", it.name).put("breakPercent", it.breakPercent)) }
             })
             .put("sessions", JSONArray().apply {
                 sessions.getEnded().forEach { s ->
                     put(JSONObject()
                         .put("id", s.id)
                         .put("name", s.name)
-                        .put("ratio", s.ratio)
+                        .put("breakPercent", s.breakPercent)
                         .put("startedAt", s.startedAt)
                         .put("endedAt", s.endedAt)
                         .put("autoEnded", s.autoEnded)
@@ -61,7 +61,7 @@ class JsonBackup(private val db: AppDatabase) {
         return Parsed(
             templates = (0 until tpl.length()).map { i ->
                 val o = tpl.getJSONObject(i)
-                TemplateEntity(name = o.getString("name").trim(), ratio = o.getInt("ratio"))
+                TemplateEntity(name = o.getString("name").trim(), breakPercent = percentOf(o))
             },
             sessions = (0 until ses.length()).map { i ->
                 val o = ses.getJSONObject(i)
@@ -70,7 +70,7 @@ class JsonBackup(private val db: AppDatabase) {
                 SessionEntity(
                     id = id,
                     name = o.optString("name").trim(),
-                    ratio = o.getInt("ratio"),
+                    breakPercent = percentOf(o),
                     startedAt = o.getLong("startedAt"),
                     endedAt = o.getLong("endedAt"),
                     autoEnded = o.optBoolean("autoEnded"),
@@ -87,6 +87,12 @@ class JsonBackup(private val db: AppDatabase) {
                 }
             },
         )
+    }
+
+    /** 舊版匯出檔存的是除數（ratio），換算成百分比。 */
+    private fun percentOf(o: JSONObject): Int = when {
+        o.has("breakPercent") -> o.getInt("breakPercent")
+        else -> o.getInt("ratio").let { if (it > 0) Math.round(100f / it) else 20 }
     }
 
     suspend fun plan(parsed: Parsed): ImportPlan {

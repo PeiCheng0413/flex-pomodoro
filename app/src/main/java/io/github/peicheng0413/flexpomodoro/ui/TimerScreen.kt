@@ -27,6 +27,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -56,10 +57,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.peicheng0413.flexpomodoro.app
 import io.github.peicheng0413.flexpomodoro.data.TemplateEntity
 import io.github.peicheng0413.flexpomodoro.timer.Phase
+import io.github.peicheng0413.flexpomodoro.timer.breakAllowance
 import io.github.peicheng0413.flexpomodoro.timer.TimerService
 import io.github.peicheng0413.flexpomodoro.timer.TimerSnapshot
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** 畫面上用的「現在時間」，每 200ms 更新一次。 */
 @Composable
@@ -111,10 +114,10 @@ private fun StartPanel() {
     val app = context.app
     val templates by app.db.templateDao().observeAll().collectAsStateWithLifecycle(emptyList())
     val history by app.sessions.names.collectAsStateWithLifecycle(emptyList())
-    val defaultRatio by app.settings.defaultRatio.collectAsStateWithLifecycle()
+    val defaultPercent by app.settings.defaultBreakPercent.collectAsStateWithLifecycle()
 
     var name by rememberSaveable { mutableStateOf("") }
-    var ratio by rememberSaveable(defaultRatio) { mutableIntStateOf(defaultRatio) }
+    var percent by rememberSaveable(defaultPercent) { mutableIntStateOf(defaultPercent) }
     var editing by remember { mutableStateOf<TemplateEntity?>(null) }
 
     val typed = name.trim()
@@ -148,26 +151,26 @@ private fun StartPanel() {
                     templates.forEach { t ->
                         TemplateChip(
                             template = t,
-                            selected = typed == t.name && ratio == t.ratio,
-                            onClick = { name = t.name; ratio = t.ratio },
+                            selected = typed == t.name && percent == t.breakPercent,
+                            onClick = { name = t.name; percent = t.breakPercent },
                             onLongClick = { editing = t },
                         )
                     }
                 }
             }
     
-            RatioStepper(ratio, onChange = { ratio = it })
+            BreakPercentSlider(percent, onChange = { percent = it })
     
             TextButton(
-                onClick = { editing = TemplateEntity(name = typed, ratio = ratio) },
-                enabled = typed.isNotEmpty() && templates.none { it.name == typed && it.ratio == ratio },
+                onClick = { editing = TemplateEntity(name = typed, breakPercent = percent) },
+                enabled = typed.isNotEmpty() && templates.none { it.name == typed && it.breakPercent == percent },
             ) { Text("存成模板") }
         }
         Spacer(Modifier.height(16.dp))
         Button(
             onClick = {
                 app.appScope.launch {
-                    app.sessions.start(name, ratio)
+                    app.sessions.start(name, percent)
                     TimerService.start(context)
                 }
             },
@@ -194,21 +197,34 @@ private fun TemplateChip(template: TemplateEntity, selected: Boolean, onClick: (
         ),
     ) {
         Text(
-            "${template.name} ÷${template.ratio}",
+            "${template.name} ${template.breakPercent}%",
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelLarge,
         )
     }
 }
 
+const val MIN_BREAK_PERCENT = 5
+const val MAX_BREAK_PERCENT = 50
+
+/** 休息比例：工作時間的百分之多少可以拿來休息。 */
 @Composable
-fun RatioStepper(value: Int, onChange: (Int) -> Unit, label: String = "休息比例") {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f))
-        OutlinedButton(onClick = { onChange((value - 1).coerceAtLeast(1)) }, enabled = value > 1) { Text("−") }
-        Text("÷ $value", modifier = Modifier.width(64.dp), textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.titleMedium)
-        OutlinedButton(onClick = { onChange((value + 1).coerceAtMost(20)) }, enabled = value < 20) { Text("+") }
+fun BreakPercentSlider(value: Int, onChange: (Int) -> Unit, label: String = "休息比例") {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.weight(1f))
+            Text("$value%", style = MaterialTheme.typography.titleMedium)
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt().coerceIn(MIN_BREAK_PERCENT, MAX_BREAK_PERCENT)) },
+            valueRange = MIN_BREAK_PERCENT.toFloat()..MAX_BREAK_PERCENT.toFloat(),
+        )
+        Text(
+            "工作 50 分鐘可以休息 ${formatDurationWords(breakAllowance(50 * 60_000L, value))}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -217,7 +233,7 @@ fun RatioStepper(value: Int, onChange: (Int) -> Unit, label: String = "休息比
 fun TemplateDialog(template: TemplateEntity, onDismiss: () -> Unit) {
     val app = LocalContext.current.app
     var name by remember { mutableStateOf(template.name) }
-    var ratio by remember { mutableIntStateOf(template.ratio) }
+    var percent by remember { mutableIntStateOf(template.breakPercent) }
     val isNew = template.id == 0L
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -225,14 +241,14 @@ fun TemplateDialog(template: TemplateEntity, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名稱") }, singleLine = true)
-                RatioStepper(ratio, onChange = { ratio = it })
+                BreakPercentSlider(percent, onChange = { percent = it })
             }
         },
         confirmButton = {
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = {
-                    val t = template.copy(name = name.trim(), ratio = ratio)
+                    val t = template.copy(name = name.trim(), breakPercent = percent)
                     app.appScope.launch {
                         if (isNew) app.db.templateDao().insert(t) else app.db.templateDao().update(t)
                     }

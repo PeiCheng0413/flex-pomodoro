@@ -15,19 +15,21 @@ import org.junit.Test
 class TimerLogicTest {
     private val sec = 1000L
     private val min = 60 * sec
-    private val session = SessionEntity(id = "s", name = "讀書", ratio = 5, startedAt = 0)
+    private val session = SessionEntity(id = "s", name = "讀書", breakPercent = 20, startedAt = 0)
 
     private fun seg(type: SegmentType, round: Int, start: Long, end: Long?, allowance: Long = 0) =
         SegmentEntity(sessionId = "s", type = type, round = round, start = start, end = end, allowanceMs = allowance)
 
     @Test
     fun allowanceRoundsUpToWholeSecond() {
-        // 7:23 ÷ 5 = 88.6 秒 → 89 秒
-        assertEquals(89 * sec, breakAllowance(7 * min + 23 * sec, 5))
-        assertEquals(10 * min, breakAllowance(50 * min, 5))
-        assertEquals(1 * sec, breakAllowance(1, 5))
-        assertEquals(0, breakAllowance(0, 5))
-        assertEquals(15 * min, breakAllowance(45 * min, 3))
+        // 7:23 的 20% = 88.6 秒 → 89 秒
+        assertEquals(89 * sec, breakAllowance(7 * min + 23 * sec, 20))
+        assertEquals(10 * min, breakAllowance(50 * min, 20))
+        assertEquals(1 * sec, breakAllowance(1, 20))
+        assertEquals(0, breakAllowance(0, 20))
+        assertEquals(891 * sec, breakAllowance(45 * min, 33)) // 45 分鐘的 33% = 14:51
+        assertEquals(5 * min, breakAllowance(100 * min, 5))
+        assertEquals(50 * min, breakAllowance(100 * min, 50))
     }
 
     @Test

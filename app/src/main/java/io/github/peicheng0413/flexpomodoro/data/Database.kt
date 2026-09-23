@@ -11,6 +11,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -21,7 +22,8 @@ enum class SegmentType { WORK, PAUSE, BREAK }
 data class SessionEntity(
     @PrimaryKey val id: String,
     val name: String,
-    val ratio: Int,
+    /** 休息額度佔工作時間的百分比。 */
+    val breakPercent: Int,
     val startedAt: Long,
     val endedAt: Long? = null,
     val autoEnded: Boolean = false,
@@ -43,7 +45,7 @@ data class SegmentEntity(
 data class TemplateEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val ratio: Int,
+    val breakPercent: Int,
 )
 
 @Dao
@@ -127,7 +129,7 @@ interface TemplateDao {
 
 @Database(
     entities = [SessionEntity::class, SegmentEntity::class, TemplateEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -141,10 +143,21 @@ abstract class AppDatabase : RoomDatabase() {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                         // 預設模板
                         listOf("讀書", "運動", "工作").forEach {
-                            db.execSQL("INSERT INTO templates (name, ratio) VALUES (?, 5)", arrayOf(it))
+                            db.execSQL("INSERT INTO templates (name, breakPercent) VALUES (?, 20)", arrayOf(it))
                         }
                     }
                 })
+                .addMigrations(MIGRATION_1_2)
                 .build()
+
+        /** 休息比例從「除數」改成「百分比」：÷5 → 20%。 */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                listOf("sessions", "templates").forEach { table ->
+                    db.execSQL("ALTER TABLE $table RENAME COLUMN ratio TO breakPercent")
+                    db.execSQL("UPDATE $table SET breakPercent = MAX(1, CAST(100.0 / breakPercent + 0.5 AS INTEGER)) WHERE breakPercent > 0")
+                }
+            }
+        }
     }
 }

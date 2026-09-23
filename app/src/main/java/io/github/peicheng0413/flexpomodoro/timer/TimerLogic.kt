@@ -9,11 +9,10 @@ enum class Phase { WORKING, PAUSED, BREAK }
 const val MINUTE_MS = 60_000L
 const val OVERTIME_PING_MS = 5 * MINUTE_MS
 
-/** 休息額度＝工作時間 ÷ 比例，無條件進位到秒。 */
-fun breakAllowance(workMs: Long, ratio: Int): Long {
-    if (workMs <= 0) return 0
-    val msPerAllowanceSecond = ratio * 1000L
-    return (workMs + msPerAllowanceSecond - 1) / msPerAllowanceSecond * 1000L
+/** 休息額度＝工作時間 × 百分比，無條件進位到秒。 */
+fun breakAllowance(workMs: Long, breakPercent: Int): Long {
+    if (workMs <= 0 || breakPercent <= 0) return 0
+    return (workMs * breakPercent + 99_999) / 100_000 * 1000L
 }
 
 /** 進行中專注在某個時間點的狀態。所有時間都是 epoch 毫秒。 */
@@ -46,7 +45,7 @@ data class TimerSnapshot(
     /** 休息剩餘時間，負數代表超時。 */
     fun breakRemainingMs(now: Long): Long = breakEndAt - now
 
-    fun nextAllowanceMs(now: Long): Long = breakAllowance(workMs(now), session.ratio)
+    fun nextAllowanceMs(now: Long): Long = breakAllowance(workMs(now), session.breakPercent)
 
     /** 會觸發自動結束的時間點；工作中不會自動結束。 */
     fun autoEndTriggerAt(thresholdMs: Long): Long? = autoEndCutAt()?.plus(thresholdMs)

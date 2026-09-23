@@ -48,7 +48,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val app = context.app
     val settings = app.settings
     val scope = rememberCoroutineScope()
-    val ratio by settings.defaultRatio.collectAsStateWithLifecycle()
+    val percent by settings.defaultBreakPercent.collectAsStateWithLifecycle()
     val autoEnd by settings.autoEndMinutes.collectAsStateWithLifecycle()
     val brightness by settings.landscapeBrightness.collectAsStateWithLifecycle()
     val templates by app.db.templateDao().observeAll().collectAsStateWithLifecycle(emptyList())
@@ -86,7 +86,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Section("計時")
-        RatioStepper(ratio, onChange = settings::setDefaultRatio, label = "預設休息比例")
+        BreakPercentSlider(percent, onChange = settings::setDefaultBreakPercent, label = "預設休息比例")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("自動結束")
@@ -106,7 +106,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         HorizontalDivider()
         Row(verticalAlignment = Alignment.CenterVertically) {
             Section("模板", Modifier.weight(1f))
-            TextButton(onClick = { editing = TemplateEntity(name = "", ratio = ratio) }) {
+            TextButton(onClick = { editing = TemplateEntity(name = "", breakPercent = percent) }) {
                 Icon(Icons.Filled.Add, null)
                 Text("新增")
             }
@@ -117,7 +117,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(t.name, modifier = Modifier.weight(1f))
-                Text("÷${t.ratio}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${t.breakPercent}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
