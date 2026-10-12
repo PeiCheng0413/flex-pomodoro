@@ -30,12 +30,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.peicheng0413.flexpomodoro.app
 import io.github.peicheng0413.flexpomodoro.data.JsonBackup
-import io.github.peicheng0413.flexpomodoro.data.TemplateEntity
+import io.github.peicheng0413.flexpomodoro.data.HabitEntity
+import io.github.peicheng0413.flexpomodoro.habit.GoalHistory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,9 +53,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val percent by settings.defaultBreakPercent.collectAsStateWithLifecycle()
     val autoEnd by settings.autoEndMinutes.collectAsStateWithLifecycle()
     val brightness by settings.landscapeBrightness.collectAsStateWithLifecycle()
-    val templates by app.db.templateDao().observeAll().collectAsStateWithLifecycle(emptyList())
+    val habits by app.habits.habits.collectAsStateWithLifecycle(emptyList())
+    val goals by app.habits.goals.collectAsStateWithLifecycle(emptyList())
 
-    var editing by remember { mutableStateOf<TemplateEntity?>(null) }
+    // 新增習慣用 creating，編輯既有的用 editing
+    var editing by remember { mutableStateOf<HabitEntity?>(null) }
+    var creating by remember { mutableStateOf(false) }
     var importPlan by remember { mutableStateOf<JsonBackup.ImportPlan?>(null) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -87,16 +92,17 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     ) {
         Section("計時")
         BreakPercentSlider(percent, onChange = settings::setDefaultBreakPercent, label = "預設休息比例")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("自動結束")
-                Text("暫停或休息超時超過這個時間就自動結束", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            OutlinedButton(onClick = { settings.setAutoEndMinutes((autoEnd - 10).coerceAtLeast(10)) }, enabled = autoEnd > 10) { Text("−") }
-            Text("$autoEnd 分", modifier = Modifier.padding(horizontal = 8.dp))
-            OutlinedButton(onClick = { settings.setAutoEndMinutes((autoEnd + 10).coerceAtMost(240)) }, enabled = autoEnd < 240) { Text("+") }
-        }
+        Text("單純計時和新增習慣時的預設值", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Stepper(
+            label = "自動結束",
+            hint = "暫停或休息超時超過這個時間就自動結束",
+            value = "$autoEnd 分",
+            onMinus = { settings.setAutoEndMinutes((autoEnd - 10).coerceAtLeast(10)) },
+            onPlus = { settings.setAutoEndMinutes((autoEnd + 10).coerceAtMost(240)) },
+            canMinus = autoEnd > 10,
+            canPlus = autoEnd < 240,
+        )
 
         HorizontalDivider()
         Section("橫向專注模式")
@@ -105,19 +111,28 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
         HorizontalDivider()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Section("模板", Modifier.weight(1f))
-            TextButton(onClick = { editing = TemplateEntity(name = "", breakPercent = percent) }) {
+            Section("習慣", Modifier.weight(1f))
+            TextButton(onClick = { creating = true }) {
                 Icon(Icons.Filled.Add, null)
                 Text("新增")
             }
         }
-        templates.forEach { t ->
+        val today = LocalDate.now()
+        habits.forEach { h ->
+            val goal = GoalHistory(goals.filter { it.habitId == h.id }).at(today)
             Row(
-                Modifier.fillMaxWidth().clickable { editing = t }.padding(vertical = 10.dp),
+                Modifier.fillMaxWidth().clickable { editing = h }.padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(t.name, modifier = Modifier.weight(1f))
-                Text("${t.breakPercent}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.weight(1f)) {
+                    Text(h.name + if (h.archived) "（已封存）" else "",
+                        color = if (h.archived) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified)
+                    Text(
+                        "每天 ${goal.dailyMinutes} 分 · 每週 ${goal.weeklyDays} 天 · 休息 ${h.breakPercent}%",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -127,20 +142,21 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             OutlinedButton(onClick = { exporter.launch("flex-pomodoro-${LocalDate.now()}.json") }) { Text("匯出 JSON") }
             OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("匯入 JSON") }
         }
-        Text("匯入會合併資料：已經有的紀錄和同名模板會跳過。", style = MaterialTheme.typography.bodySmall,
+        Text("匯入會合併資料：已經有的紀錄和同名習慣會跳過。", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 
-    editing?.let { TemplateDialog(template = it, onDismiss = { editing = null }) }
+    editing?.let { HabitDialog(habit = it, onDismiss = { editing = null }) }
+    if (creating) HabitDialog(habit = null, onDismiss = { creating = false })
 
     importPlan?.let { plan ->
         AlertDialog(
             onDismissRequest = { importPlan = null },
             title = { Text("匯入資料") },
-            text = { Text("將新增 ${plan.newSessions.size} 筆紀錄、${plan.newTemplates.size} 個模板。") },
+            text = { Text("將新增 ${plan.newSessions.size} 筆紀錄、${plan.newHabits.size} 個習慣。") },
             confirmButton = {
                 TextButton(
-                    enabled = plan.newSessions.isNotEmpty() || plan.newTemplates.isNotEmpty(),
+                    enabled = plan.newSessions.isNotEmpty() || plan.newHabits.isNotEmpty(),
                     onClick = {
                         importPlan = null
                         scope.launch {

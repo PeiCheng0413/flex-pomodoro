@@ -1,10 +1,14 @@
 package io.github.peicheng0413.flexpomodoro.ui
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+
+/** 專注的顯示名稱：沒有選習慣的就是單純計時。 */
+fun sessionTitle(name: String): String = name.ifEmpty { "單純計時" }
 
 /** 12:34 或 1:02:03。 */
 fun formatDuration(ms: Long): String {
@@ -34,6 +38,11 @@ fun formatDurationWords(ms: Long): String {
         else -> "$m 分"
     }
 }
+
+/** 「10/5（日）」。 */
+fun formatDate(date: LocalDate): String = dayFormatter.format(date)
+
+private val dayFormatter = DateTimeFormatter.ofPattern("M/d（E）", Locale.TAIWAN)
 
 private val dateFormatter = DateTimeFormatter.ofPattern("M/d（E）HH:mm", Locale.TAIWAN)
 

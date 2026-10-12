@@ -3,36 +3,59 @@ package io.github.peicheng0413.flexpomodoro.data
 import androidx.room.withTransaction
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 
-/** 匯出／匯入 JSON。匯入採合併：紀錄以 id 去重，模板同名跳過。只處理已結束的專注。 */
+/**
+ * 匯出／匯入 JSON。匯入採合併：紀錄以 id 去重，習慣同名跳過（不覆蓋現有目標）。只處理已結束的專注。
+ * 檔案裡用習慣名稱串起紀錄與習慣，因為各台手機的習慣 id 不同。
+ * version 1（模板時代）的檔案也能匯入：模板變成習慣、紀錄依名稱歸類。
+ */
 class JsonBackup(private val db: AppDatabase) {
     private val sessions = db.sessionDao()
-    private val templates = db.templateDao()
+    private val habits = db.habitDao()
 
-    data class Parsed(
-        val templates: List<TemplateEntity>,
-        val sessions: List<Pair<SessionEntity, List<SegmentEntity>>>,
-    )
+    data class ParsedGoal(val effectiveFrom: Long, val dailyMinutes: Int, val weeklyDays: Int)
 
-    data class ImportPlan(
-        val newTemplates: List<TemplateEntity>,
-        val newSessions: List<Pair<SessionEntity, List<SegmentEntity>>>,
-    )
+    data class ParsedHabit(val name: String, val breakPercent: Int, val archived: Boolean, val goals: List<ParsedGoal>)
+
+    /** habitName 為 null 表示未歸類。 */
+    data class ParsedSession(val session: SessionEntity, val habitName: String?, val segments: List<SegmentEntity>)
+
+    data class Parsed(val habits: List<ParsedHabit>, val sessions: List<ParsedSession>)
+
+    data class ImportPlan(val newHabits: List<ParsedHabit>, val newSessions: List<ParsedSession>)
 
     suspend fun export(): String {
         val segs = sessions.getEndedSegments().groupBy { it.sessionId }
+        val allHabits = habits.getAll()
+        val names = allHabits.associate { it.id to it.name }
+        val goals = habits.getGoals().groupBy { it.habitId }
         val root = JSONObject()
             .put("format", "flex-pomodoro")
-            .put("version", 1)
+            .put("version", 2)
             .put("exportedAt", System.currentTimeMillis())
-            .put("templates", JSONArray().apply {
-                templates.getAll().forEach { put(JSONObject().put("name", it.name).put("breakPercent", it.breakPercent)) }
+            .put("habits", JSONArray().apply {
+                allHabits.forEach { h ->
+                    put(JSONObject()
+                        .put("name", h.name)
+                        .put("breakPercent", h.breakPercent)
+                        .put("archived", h.archived)
+                        .put("goals", JSONArray().apply {
+                            goals[h.id].orEmpty().forEach { g ->
+                                put(JSONObject()
+                                    .put("from", LocalDate.ofEpochDay(g.effectiveFrom).toString())
+                                    .put("dailyMinutes", g.dailyMinutes)
+                                    .put("weeklyDays", g.weeklyDays))
+                            }
+                        }))
+                }
             })
             .put("sessions", JSONArray().apply {
                 sessions.getEnded().forEach { s ->
                     put(JSONObject()
                         .put("id", s.id)
                         .put("name", s.name)
+                        .put("habit", s.habitId?.let { names[it] } ?: JSONObject.NULL)
                         .put("breakPercent", s.breakPercent)
                         .put("startedAt", s.startedAt)
                         .put("endedAt", s.endedAt)
@@ -56,35 +79,60 @@ class JsonBackup(private val db: AppDatabase) {
     fun parse(text: String): Parsed {
         val root = JSONObject(text)
         require(root.optString("format") == "flex-pomodoro") { "不是彈性蕃茄鐘的匯出檔" }
-        val tpl = root.optJSONArray("templates") ?: JSONArray()
+        val legacy = root.optInt("version", 1) < 2
+        // version 1 叫 templates，沒有目標
+        val hab = root.optJSONArray(if (legacy) "templates" else "habits") ?: JSONArray()
         val ses = root.optJSONArray("sessions") ?: JSONArray()
         return Parsed(
-            templates = (0 until tpl.length()).map { i ->
-                val o = tpl.getJSONObject(i)
-                TemplateEntity(name = o.getString("name").trim(), breakPercent = percentOf(o))
+            habits = (0 until hab.length()).map { i ->
+                val o = hab.getJSONObject(i)
+                val goals = o.optJSONArray("goals") ?: JSONArray()
+                ParsedHabit(
+                    name = o.getString("name").trim(),
+                    breakPercent = percentOf(o),
+                    archived = o.optBoolean("archived"),
+                    goals = (0 until goals.length()).map { j ->
+                        val g = goals.getJSONObject(j)
+                        ParsedGoal(
+                            effectiveFrom = LocalDate.parse(g.getString("from")).toEpochDay(),
+                            dailyMinutes = g.getInt("dailyMinutes"),
+                            weeklyDays = g.getInt("weeklyDays"),
+                        )
+                    },
+                )
             },
             sessions = (0 until ses.length()).map { i ->
                 val o = ses.getJSONObject(i)
                 val id = o.getString("id")
+                val name = o.optString("name").trim()
                 val arr = o.getJSONArray("segments")
-                SessionEntity(
-                    id = id,
-                    name = o.optString("name").trim(),
-                    breakPercent = percentOf(o),
-                    startedAt = o.getLong("startedAt"),
-                    endedAt = o.getLong("endedAt"),
-                    autoEnded = o.optBoolean("autoEnded"),
-                ) to (0 until arr.length()).map { j ->
-                    val g = arr.getJSONObject(j)
-                    SegmentEntity(
-                        sessionId = id,
-                        type = SegmentType.valueOf(g.getString("type")),
-                        round = g.getInt("round"),
-                        start = g.getLong("start"),
-                        end = g.getLong("end"),
-                        allowanceMs = g.optLong("allowanceMs"),
-                    )
-                }
+                ParsedSession(
+                    session = SessionEntity(
+                        id = id,
+                        name = name,
+                        breakPercent = percentOf(o),
+                        startedAt = o.getLong("startedAt"),
+                        endedAt = o.getLong("endedAt"),
+                        autoEnded = o.optBoolean("autoEnded"),
+                    ),
+                    // version 1 用名稱分組：有名稱就歸到同名習慣
+                    habitName = when {
+                        legacy -> name.ifEmpty { null }
+                        o.isNull("habit") -> null
+                        else -> o.getString("habit").trim().ifEmpty { null }
+                    },
+                    segments = (0 until arr.length()).map { j ->
+                        val g = arr.getJSONObject(j)
+                        SegmentEntity(
+                            sessionId = id,
+                            type = SegmentType.valueOf(g.getString("type")),
+                            round = g.getInt("round"),
+                            start = g.getLong("start"),
+                            end = g.getLong("end"),
+                            allowanceMs = g.optLong("allowanceMs"),
+                        )
+                    },
+                )
             },
         )
     }
@@ -97,18 +145,28 @@ class JsonBackup(private val db: AppDatabase) {
 
     suspend fun plan(parsed: Parsed): ImportPlan {
         val existingIds = sessions.allIds().toSet()
-        val existingNames = templates.getAll().map { it.name }.toSet()
+        val existingNames = habits.getAll().map { it.name }.toSet()
+        val newSessions = parsed.sessions.filter { it.session.id !in existingIds }.distinctBy { it.session.id }
+        val listed = parsed.habits.filter { it.name.isNotEmpty() }
+        // 紀錄用到、但檔案裡沒列出的習慣（version 1 常見），用預設目標補建
+        val referenced = newSessions.mapNotNull { it.habitName }.filter { n -> listed.none { it.name == n } }
+            .map { n -> ParsedHabit(n, newSessions.first { it.habitName == n }.session.breakPercent, false, emptyList()) }
         return ImportPlan(
-            newTemplates = parsed.templates.filter { it.name.isNotEmpty() && it.name !in existingNames }
-                .distinctBy { it.name },
-            newSessions = parsed.sessions.filter { it.first.id !in existingIds }.distinctBy { it.first.id },
+            newHabits = (listed + referenced).filter { it.name !in existingNames }.distinctBy { it.name },
+            newSessions = newSessions,
         )
     }
 
     suspend fun apply(plan: ImportPlan) = db.withTransaction {
-        plan.newTemplates.forEach { templates.insert(it) }
-        plan.newSessions.forEach { (s, segs) ->
-            sessions.insertSession(s)
+        plan.newHabits.forEach { h ->
+            val id = habits.insert(HabitEntity(name = h.name, breakPercent = h.breakPercent, archived = h.archived))
+            if (id < 0) return@forEach
+            val goals = h.goals.ifEmpty { listOf(ParsedGoal(0, DEFAULT_DAILY_MINUTES, DEFAULT_WEEKLY_DAYS)) }
+            goals.forEach { habits.upsertGoal(HabitGoalEntity(id, it.effectiveFrom, it.dailyMinutes, it.weeklyDays)) }
+        }
+        val ids = habits.getAll().associate { it.name to it.id }
+        plan.newSessions.forEach { (s, habitName, segs) ->
+            sessions.insertSession(s.copy(habitId = habitName?.let { ids[it] }))
             sessions.insertSegments(segs)
         }
     }

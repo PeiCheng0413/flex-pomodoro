@@ -4,7 +4,6 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,26 +15,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -49,13 +42,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.peicheng0413.flexpomodoro.app
-import io.github.peicheng0413.flexpomodoro.data.TemplateEntity
+import io.github.peicheng0413.flexpomodoro.data.HabitEntity
+import io.github.peicheng0413.flexpomodoro.timer.MINUTE_MS
 import io.github.peicheng0413.flexpomodoro.timer.Phase
 import io.github.peicheng0413.flexpomodoro.timer.breakAllowance
 import io.github.peicheng0413.flexpomodoro.timer.TimerService
@@ -64,12 +57,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/** 畫面上用的「現在時間」，每 200ms 更新一次。 */
+/** 畫面上用的「現在時間」，預設每 200ms 更新一次。 */
 @Composable
-fun rememberNow(): State<Long> = produceState(System.currentTimeMillis()) {
+fun rememberNow(intervalMs: Long = 200): State<Long> = produceState(System.currentTimeMillis(), intervalMs) {
     while (true) {
         value = System.currentTimeMillis()
-        delay(200)
+        delay(intervalMs)
     }
 }
 
@@ -101,28 +94,31 @@ fun StateColors.of(kind: TimerDisplay.Kind): Color = when (kind) {
 }
 
 @Composable
-fun TimerScreen(snapshot: TimerSnapshot?, modifier: Modifier = Modifier) {
+fun TimerScreen(snapshot: TimerSnapshot?, board: HabitBoard, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-        if (snapshot == null) StartPanel() else ActivePanel(snapshot)
+        if (snapshot == null) StartPanel(board) else ActivePanel(snapshot, board)
     }
 }
 
+/** 開始面板的選擇：還沒選、單純計時，或某個習慣的 id。 */
+private const val PICK_NONE = 0L
+private const val PICK_PLAIN = -1L
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StartPanel() {
+private fun StartPanel(board: HabitBoard) {
     val context = LocalContext.current
     val app = context.app
-    val templates by app.db.templateDao().observeAll().collectAsStateWithLifecycle(emptyList())
-    val history by app.sessions.names.collectAsStateWithLifecycle(emptyList())
     val defaultPercent by app.settings.defaultBreakPercent.collectAsStateWithLifecycle()
+    val habits = board.current.map { it.habit }
 
-    var name by rememberSaveable { mutableStateOf("") }
+    var picked by rememberSaveable { mutableLongStateOf(PICK_NONE) }
     var percent by rememberSaveable(defaultPercent) { mutableIntStateOf(defaultPercent) }
-    var editing by remember { mutableStateOf<TemplateEntity?>(null) }
-
-    val typed = name.trim()
-    val suggestions = if (typed.isEmpty()) emptyList()
-    else history.filter { it.startsWith(typed) && it != typed }.take(8)
+    var editing by remember { mutableStateOf<HabitEntity?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    // 選到的習慣被封存或合併掉時就當作沒選
+    val habit = habits.firstOrNull { it.id == picked }
+    val ready = habit != null || picked == PICK_PLAIN
 
     Column(Modifier.fillMaxSize().padding(vertical = 24.dp)) {
         Column(
@@ -130,62 +126,67 @@ private fun StartPanel() {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("這次要做什麼？", style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                placeholder = { Text("可以留空") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (suggestions.isNotEmpty()) {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    suggestions.forEach { s -> SuggestionChip(onClick = { name = s }, label = { Text(s) }) }
-                }
-            }
-    
-            if (templates.isNotEmpty()) {
-                Text("模板（長按可編輯）", style = MaterialTheme.typography.labelLarge,
+            if (habits.isNotEmpty()) {
+                Text("習慣（長按可編輯）", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    templates.forEach { t ->
-                        TemplateChip(
-                            template = t,
-                            selected = typed == t.name && percent == t.breakPercent,
-                            onClick = { name = t.name; percent = t.breakPercent },
-                            onLongClick = { editing = t },
-                        )
-                    }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                habits.forEach { h ->
+                    PickChip(
+                        label = h.name,
+                        selected = h.id == picked,
+                        onClick = { picked = h.id; percent = h.breakPercent },
+                        onLongClick = { editing = h },
+                    )
+                }
+                PickChip(label = "＋ 新增習慣", selected = false, onClick = { creating = true })
+            }
+            PickChip(
+                label = "不選習慣，單純計時",
+                selected = picked == PICK_PLAIN,
+                onClick = { picked = PICK_PLAIN; percent = defaultPercent },
+            )
+            if (picked == PICK_PLAIN) {
+                Text("紀錄會先放在「未歸類」，之後可以歸入習慣。", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            habit?.let { h ->
+                board.of(h.id)?.let { p ->
+                    val today = p.today
+                    Text(
+                        "今天已做 ${p.workMs(today) / MINUTE_MS} / ${p.goal(today).dailyMinutes} 分",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
                 }
             }
-    
             BreakPercentSlider(percent, onChange = { percent = it })
-    
-            TextButton(
-                onClick = { editing = TemplateEntity(name = typed, breakPercent = percent) },
-                enabled = typed.isNotEmpty() && templates.none { it.name == typed && it.breakPercent == percent },
-            ) { Text("存成模板") }
         }
         Spacer(Modifier.height(16.dp))
         Button(
+            enabled = ready,
             onClick = {
                 app.appScope.launch {
-                    app.sessions.start(name, percent)
+                    app.sessions.start(habit, percent)
                     TimerService.start(context)
                 }
             },
             modifier = Modifier.fillMaxWidth().height(64.dp),
-        ) { Text("開始", fontSize = 20.sp) }
+        ) { Text(if (ready) "開始" else "先選一個習慣", fontSize = 20.sp) }
     }
 
-    editing?.let { t ->
-        TemplateDialog(template = t, onDismiss = { editing = null })
+    editing?.let { h -> HabitDialog(habit = h, onDismiss = { editing = null }) }
+    if (creating) {
+        HabitDialog(
+            habit = null,
+            onDismiss = { creating = false },
+            onSaved = { picked = it.id; percent = it.breakPercent },
+        )
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TemplateChip(template: TemplateEntity, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun PickChip(label: String, selected: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
     val haptic = LocalHapticFeedback.current
     Surface(
         shape = RoundedCornerShape(8.dp),
@@ -193,13 +194,13 @@ private fun TemplateChip(template: TemplateEntity, selected: Boolean, onClick: (
         border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         modifier = Modifier.combinedClickable(
             onClick = onClick,
-            onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongClick() },
+            onLongClick = onLongClick?.let { action -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); action() } },
         ),
     ) {
         Text(
-            "${template.name} ${template.breakPercent}%",
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
+            label,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.titleMedium,
         )
     }
 }
@@ -228,51 +229,9 @@ fun BreakPercentSlider(value: Int, onChange: (Int) -> Unit, label: String = "休
     }
 }
 
-/** 新增或編輯模板。id = 0 代表新增。 */
-@Composable
-fun TemplateDialog(template: TemplateEntity, onDismiss: () -> Unit) {
-    val app = LocalContext.current.app
-    var name by remember { mutableStateOf(template.name) }
-    var percent by remember { mutableIntStateOf(template.breakPercent) }
-    val isNew = template.id == 0L
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "新增模板" else "編輯模板") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名稱") }, singleLine = true)
-                BreakPercentSlider(percent, onChange = { percent = it })
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
-                onClick = {
-                    val t = template.copy(name = name.trim(), breakPercent = percent)
-                    app.appScope.launch {
-                        if (isNew) app.db.templateDao().insert(t) else app.db.templateDao().update(t)
-                    }
-                    onDismiss()
-                },
-            ) { Text("儲存") }
-        },
-        dismissButton = {
-            Row {
-                if (!isNew) {
-                    TextButton(onClick = {
-                        app.appScope.launch { app.db.templateDao().delete(template.id) }
-                        onDismiss()
-                    }) { Text("刪除", color = MaterialTheme.colorScheme.error) }
-                }
-                TextButton(onClick = onDismiss) { Text("取消") }
-            }
-        },
-    )
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ActivePanel(s: TimerSnapshot) {
+private fun ActivePanel(s: TimerSnapshot, board: HabitBoard) {
     val context = LocalContext.current
     val app = context.app
     val sessions = app.sessions
@@ -283,12 +242,23 @@ private fun ActivePanel(s: TimerSnapshot) {
     fun run(block: suspend () -> Unit) { app.appScope.launch { block() } }
 
     Column(Modifier.fillMaxSize().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        val progress = s.session.habitId?.let(board::of)
         Text(
-            s.session.name.ifEmpty { "未命名" },
+            progress?.habit?.name ?: sessionTitle(s.session.name),
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
         )
+        progress?.let { p ->
+            val today = p.today
+            Text(
+                "今天 ${p.workMs(today) / MINUTE_MS} / ${p.goal(today).dailyMinutes} 分" + if (p.done(today)) " · 已達成" else "",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (p.done(today)) LocalStateColors.current.rest else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
+        }
         Spacer(Modifier.weight(1f))
         Text(d.label, style = MaterialTheme.typography.titleMedium, color = color)
         Text(d.text, style = TimerDigits, fontSize = if (d.text.length > 6) 64.sp else 88.sp, color = color)

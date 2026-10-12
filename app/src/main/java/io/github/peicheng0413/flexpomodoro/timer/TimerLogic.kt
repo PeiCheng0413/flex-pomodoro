@@ -72,18 +72,3 @@ data class SessionSummary(
         .sumOf { (it.duration() - it.allowanceMs).coerceAtLeast(0) }
     val rounds: Int = segments.filter { it.type == SegmentType.WORK }.map { it.round }.distinct().size
 }
-
-/** 統計分組：名稱去除前後空白後完全相同才算同一組，空白歸為「未命名」。 */
-data class NameGroup(
-    val name: String,
-    val sessions: List<SessionSummary>,
-) {
-    val workMs = sessions.sumOf { it.workMs }
-    val overtimeMs = sessions.sumOf { it.overtimeMs }
-    val count = sessions.size
-}
-
-fun groupByName(sessions: List<SessionSummary>): List<NameGroup> =
-    sessions.groupBy { it.session.name.trim() }
-        .map { (name, list) -> NameGroup(name, list.sortedByDescending { it.session.startedAt }) }
-        .sortedByDescending { it.workMs }

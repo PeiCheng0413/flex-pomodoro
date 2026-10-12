@@ -3,6 +3,7 @@ package io.github.peicheng0413.flexpomodoro
 import android.app.Application
 import android.content.Context
 import io.github.peicheng0413.flexpomodoro.data.AppDatabase
+import io.github.peicheng0413.flexpomodoro.data.HabitRepository
 import io.github.peicheng0413.flexpomodoro.data.JsonBackup
 import io.github.peicheng0413.flexpomodoro.data.SessionRepository
 import io.github.peicheng0413.flexpomodoro.data.Settings
@@ -18,6 +19,8 @@ class FlexApp : Application() {
         private set
     lateinit var sessions: SessionRepository
         private set
+    lateinit var habits: HabitRepository
+        private set
     lateinit var backup: JsonBackup
         private set
 
@@ -29,6 +32,7 @@ class FlexApp : Application() {
         db = AppDatabase.create(this)
         settings = Settings(this)
         sessions = SessionRepository(db, settings)
+        habits = HabitRepository(db)
         backup = JsonBackup(db)
         Notifications.createChannels(this)
     }

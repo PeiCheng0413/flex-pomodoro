@@ -11,6 +11,7 @@ import io.github.peicheng0413.flexpomodoro.MainActivity
 import io.github.peicheng0413.flexpomodoro.R
 import io.github.peicheng0413.flexpomodoro.ui.formatDuration
 import io.github.peicheng0413.flexpomodoro.ui.formatDurationWords
+import io.github.peicheng0413.flexpomodoro.ui.sessionTitle
 
 object Notifications {
     const val ONGOING_ID = 1
@@ -65,7 +66,7 @@ object Notifications {
             .build()
 
     fun ongoing(context: Context, s: TimerSnapshot, now: Long): Notification {
-        val name = s.session.name.ifEmpty { "未命名" }
+        val name = sessionTitle(s.session.name)
         val b = NotificationCompat.Builder(context, CH_ONGOING)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(openApp(context))
@@ -134,7 +135,7 @@ object Notifications {
         NotificationCompat.Builder(context, CH_AUTO_END)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("已自動結束")
-            .setContentText("${summary.session.name.ifEmpty { "未命名" }}：本次工作 ${formatDurationWords(summary.workMs)}")
+            .setContentText("${sessionTitle(summary.session.name)}：本次工作 ${formatDurationWords(summary.workMs)}")
             .setContentIntent(openApp(context))
             .setAutoCancel(true)
             .build())

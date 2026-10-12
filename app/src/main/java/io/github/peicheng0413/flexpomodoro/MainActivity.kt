@@ -10,7 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -35,9 +35,10 @@ import io.github.peicheng0413.flexpomodoro.timer.TimerService
 import io.github.peicheng0413.flexpomodoro.timer.TimerSnapshot
 import io.github.peicheng0413.flexpomodoro.ui.FlexTheme
 import io.github.peicheng0413.flexpomodoro.ui.FocusScreen
+import io.github.peicheng0413.flexpomodoro.ui.HabitsScreen
 import io.github.peicheng0413.flexpomodoro.ui.SettingsScreen
-import io.github.peicheng0413.flexpomodoro.ui.StatsScreen
 import io.github.peicheng0413.flexpomodoro.ui.TimerScreen
+import io.github.peicheng0413.flexpomodoro.ui.rememberHabitBoard
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -81,22 +82,28 @@ private fun AppRoot() {
     }
 }
 
+private const val TAB_HABITS = 0
+private const val TAB_TIMER = 1
+private const val TAB_SETTINGS = 2
+
 @Composable
 private fun MainScaffold(snapshot: TimerSnapshot?) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    // 打開 App 時如果正在專注，直接停在計時頁
+    var tab by rememberSaveable { mutableIntStateOf(if (snapshot != null) TAB_TIMER else TAB_HABITS) }
+    val board = rememberHabitBoard(snapshot)
     Scaffold(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
-                    selected = tab == 0, onClick = { tab = 0 },
+                    selected = tab == TAB_HABITS, onClick = { tab = TAB_HABITS },
+                    icon = { Icon(Icons.Filled.DateRange, null) }, label = { Text("習慣") },
+                )
+                NavigationBarItem(
+                    selected = tab == TAB_TIMER, onClick = { tab = TAB_TIMER },
                     icon = { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("計時") },
                 )
                 NavigationBarItem(
-                    selected = tab == 1, onClick = { tab = 1 },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("統計") },
-                )
-                NavigationBarItem(
-                    selected = tab == 2, onClick = { tab = 2 },
+                    selected = tab == TAB_SETTINGS, onClick = { tab = TAB_SETTINGS },
                     icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("設定") },
                 )
             }
@@ -104,8 +111,8 @@ private fun MainScaffold(snapshot: TimerSnapshot?) {
     ) { padding ->
         val modifier = Modifier.padding(padding)
         when (tab) {
-            0 -> TimerScreen(snapshot, modifier)
-            1 -> StatsScreen(modifier)
+            TAB_HABITS -> HabitsScreen(board, snapshot, onGoTimer = { tab = TAB_TIMER }, modifier = modifier)
+            TAB_TIMER -> TimerScreen(snapshot, board, modifier)
             else -> SettingsScreen(modifier)
         }
     }

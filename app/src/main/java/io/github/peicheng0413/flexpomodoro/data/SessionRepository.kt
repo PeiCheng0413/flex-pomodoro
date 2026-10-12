@@ -37,8 +37,6 @@ class SessionRepository(
             sessions.map { SessionSummary(it, bySession[it.id].orEmpty()) }
         }
 
-    val names: Flow<List<String>> = dao.observeNames()
-
     suspend fun snapshot(): TimerSnapshot? {
         val session = dao.getActive() ?: return null
         val segs = dao.getSegments(session.id)
@@ -49,10 +47,15 @@ class SessionRepository(
     private suspend fun <T> locked(block: suspend () -> T): T =
         mutex.withLock { db.withTransaction { block() } }
 
-    suspend fun start(name: String, breakPercent: Int, now: Long = System.currentTimeMillis()) = locked {
+    /** 開始一次專注。habit 為 null 是單純計時，紀錄會先放在「未歸類」。 */
+    suspend fun start(habit: HabitEntity?, breakPercent: Int, now: Long = System.currentTimeMillis()) = locked {
         if (dao.getActive() != null) return@locked
         val id = UUID.randomUUID().toString()
-        dao.insertSession(SessionEntity(id = id, name = name.trim(), breakPercent = breakPercent, startedAt = now))
+        dao.insertSession(
+            SessionEntity(
+                id = id, name = habit?.name.orEmpty(), breakPercent = breakPercent, startedAt = now, habitId = habit?.id,
+            )
+        )
         dao.insertSegment(SegmentEntity(sessionId = id, type = SegmentType.WORK, round = 1, start = now))
     }
 
@@ -126,11 +129,8 @@ class SessionRepository(
         return summary
     }
 
-    suspend fun rename(id: String, name: String) = locked { dao.rename(id, name.trim()) }
-
-    suspend fun renameGroup(oldName: String, newName: String) = locked {
-        dao.renameGroup(oldName, newName.trim())
-    }
+    /** 把紀錄移到某個習慣，null 表示改回未歸類。 */
+    suspend fun assign(id: String, habitId: Long?) = locked { dao.assign(id, habitId) }
 
     suspend fun delete(id: String) = locked { deleteLocked(id) }
 
