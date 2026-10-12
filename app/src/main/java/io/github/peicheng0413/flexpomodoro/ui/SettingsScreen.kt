@@ -128,7 +128,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     Text(h.name + if (h.archived) "（已封存）" else "",
                         color = if (h.archived) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified)
                     Text(
-                        "每天 ${goal.dailyMinutes} 分 · 每週 ${goal.weeklyDays} 天 · 休息 ${h.breakPercent}%",
+                        "${goal.shortLabel()} · 休息 ${h.breakPercent}%",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -1,6 +1,14 @@
 package io.github.peicheng0413.flexpomodoro.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -149,6 +157,58 @@ fun Heatmap(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+private val WEEKDAY_LABELS = listOf("一", "二", "三", "四", "五", "六", "日")
+
+/**
+ * 本週週曆（星期一到日）：格子裡是日期，顏色階和熱圖一樣，達成的那天亮成綠色。
+ * 今天加外框，還沒到的日子只畫淡框。
+ */
+@Composable
+fun WeekStrip(today: LocalDate, level: (LocalDate) -> Int, modifier: Modifier = Modifier) {
+    val colors = heatColors()
+    val shape = RoundedCornerShape(8.dp)
+    val monday = today.weekStart()
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        WEEKDAY_LABELS.forEachIndexed { i, label ->
+            val date = monday.plusDays(i.toLong())
+            val future = date.isAfter(today)
+            val lv = if (future) 0 else level(date).coerceIn(0, 3)
+            val fill = if (future) Color.Transparent else colors[lv]
+            // 亮綠底上的字依底色深淺選黑或白，其他格子用一般文字色
+            val textColor = when {
+                future -> MaterialTheme.colorScheme.onSurfaceVariant
+                lv == 3 -> if (fill.luminance() > 0.4f) Color.Black else Color.White
+                else -> MaterialTheme.colorScheme.onSurface
+            }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (date == today) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(shape)
+                        .background(fill)
+                        .then(
+                            when {
+                                date == today -> Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, shape)
+                                future -> Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+                                else -> Modifier
+                            }
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("${date.dayOfMonth}", style = MaterialTheme.typography.titleSmall, color = textColor)
                 }
             }
         }

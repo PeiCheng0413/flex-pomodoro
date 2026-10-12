@@ -197,9 +197,20 @@ private fun HabitCard(
                     }
                 }
             }
+            WeekStrip(today = today, level = p::level)
+            // 目標頻率一行：左邊是簡寫的目標，右邊是本週進度
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("今天 ${work / MINUTE_MS} / ${goal.dailyMinutes} 分", style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f))
+                Text(goal.shortLabel(), style = MaterialTheme.typography.bodyLarge, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(
+                    weekShort(p, week),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (p.weekMet(week)) green else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("今天 ${work / MINUTE_MS} / ${goal.dailyMinutes} 分", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                 if (p.done(today)) Text("已達成", style = MaterialTheme.typography.titleSmall, color = green)
             }
             LinearProgressIndicator(
@@ -208,14 +219,14 @@ private fun HabitCard(
                 color = green,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
-            Text(
-                weekLine(p, week),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Heatmap(today = today, firstDay = today, level = p::level, weekMet = p::weekMet, cell = 11.dp, gap = 2.dp, labels = false)
         }
     }
+}
+
+/** 卡片右側的本週進度：「本週 3/5 · 連續2週」。 */
+private fun weekShort(p: HabitProgress, week: LocalDate) = buildString {
+    append("本週 ${p.daysDone(week)}/${p.weekTarget(week)}")
+    if (p.streakWeeks > 0) append(" · 連續${p.streakWeeks}週")
 }
 
 private fun weekLine(p: HabitProgress, week: LocalDate) = buildString {
@@ -338,7 +349,7 @@ private fun HabitSummary(p: HabitProgress, selected: LocalDate, onSelect: (Local
     val goal = p.goal(today)
     val dayGoal = p.goal(selected)
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("目標：每天 ${goal.dailyMinutes} 分 · 每週 ${goal.weeklyDays} 天", style = MaterialTheme.typography.bodyLarge)
+        Text("目標 ${goal.shortLabel()}", style = MaterialTheme.typography.bodyLarge)
         Text(weekLine(p, today.weekStart()), style = MaterialTheme.typography.titleMedium)
         Heatmap(
             today = today,

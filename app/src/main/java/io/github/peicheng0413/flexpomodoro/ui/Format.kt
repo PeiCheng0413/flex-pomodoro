@@ -1,5 +1,6 @@
 package io.github.peicheng0413.flexpomodoro.ui
 
+import io.github.peicheng0413.flexpomodoro.habit.Goal
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -9,6 +10,9 @@ import kotlin.math.abs
 
 /** 專注的顯示名稱：沒有選習慣的就是單純計時。 */
 fun sessionTitle(name: String): String = name.ifEmpty { "單純計時" }
+
+/** 目標頻率的簡寫：「30分/日 · 5天/週」。 */
+fun Goal.shortLabel(): String = "${dailyMinutes}分/日 · ${weeklyDays}天/週"
 
 /** 12:34 或 1:02:03。 */
 fun formatDuration(ms: Long): String {
