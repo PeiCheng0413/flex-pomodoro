@@ -58,6 +58,8 @@ import io.github.peicheng0413.flexpomodoro.app
 import io.github.peicheng0413.flexpomodoro.data.HabitEntity
 import io.github.peicheng0413.flexpomodoro.data.SegmentType
 import io.github.peicheng0413.flexpomodoro.habit.HabitProgress
+import io.github.peicheng0413.flexpomodoro.habit.LEVEL_DONE
+import io.github.peicheng0413.flexpomodoro.habit.Mark
 import io.github.peicheng0413.flexpomodoro.habit.overviewLevel
 import io.github.peicheng0413.flexpomodoro.habit.weekStart
 import io.github.peicheng0413.flexpomodoro.timer.MINUTE_MS
@@ -112,6 +114,9 @@ fun HabitsScreen(board: HabitBoard, snapshot: TimerSnapshot?, onGoTimer: () -> U
                 onOpen = { openHabit = p.habit.id },
                 onStart = { start(p.habit) },
                 onGoTimer = onGoTimer,
+                onMark = { date ->
+                    app.appScope.launch { app.habits.setMark(p.habit.id, date, p.markAfterTap(date)) }
+                },
             )
         }
         item {
@@ -172,6 +177,7 @@ private fun HabitCard(
     onOpen: () -> Unit,
     onStart: () -> Unit,
     onGoTimer: () -> Unit,
+    onMark: (LocalDate) -> Unit,
 ) {
     val today = p.today
     val goal = p.goal(today)
@@ -197,7 +203,7 @@ private fun HabitCard(
                     }
                 }
             }
-            WeekStrip(today = today, level = p::level)
+            WeekStrip(today = today, level = p::level, onDayClick = onMark)
             // 目標頻率一行：左邊是簡寫的目標，右邊是本週進度
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(goal.shortLabel(), style = MaterialTheme.typography.bodyLarge, maxLines = 1,
@@ -361,7 +367,12 @@ private fun HabitSummary(p: HabitProgress, selected: LocalDate, onSelect: (Local
         )
         Text(
             "${formatDate(selected)}　${p.workMs(selected) / MINUTE_MS} / ${dayGoal.dailyMinutes} 分" +
-                if (p.done(selected)) " · 已達成" else "",
+                when {
+                    p.timedLevel(selected) == LEVEL_DONE -> " · 已達成"
+                    p.marks[selected] == Mark.DONE -> " · 已達成（手動）"
+                    p.marks[selected] == Mark.PARTIAL -> " · 有做（手動）"
+                    else -> ""
+                },
             style = MaterialTheme.typography.titleMedium,
         )
         HeatLegend(listOf("沒做", "未滿一半", "一半以上", "達成"))

@@ -39,11 +39,12 @@ fun rememberHabitBoard(active: TimerSnapshot?): HabitBoard {
     val app = LocalContext.current.app
     val habits by app.habits.habits.collectAsStateWithLifecycle(emptyList())
     val goals by app.habits.goals.collectAsStateWithLifecycle(emptyList())
+    val marks by app.habits.marks.collectAsStateWithLifecycle(emptyList())
     val ended by app.sessions.ended.collectAsStateWithLifecycle(emptyList())
     val zone = remember { ZoneId.systemDefault() }
     val endedDaily = remember(ended) { endedDailyByHabit(ended, zone) }
     val now by rememberNow(if (active != null) 1000L else 60_000L)
-    return remember(habits, goals, ended, endedDaily, active, now) {
-        HabitBoard(buildProgress(habits, goals, endedDaily, active, now, zone), ended, now.toLocalDate(zone))
+    return remember(habits, goals, marks, ended, endedDaily, active, now) {
+        HabitBoard(buildProgress(habits, goals, endedDaily, marks, active, now, zone), ended, now.toLocalDate(zone))
     }
 }

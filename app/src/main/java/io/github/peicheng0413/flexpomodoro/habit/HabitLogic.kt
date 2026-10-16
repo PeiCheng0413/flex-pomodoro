@@ -2,6 +2,7 @@ package io.github.peicheng0413.flexpomodoro.habit
 
 import io.github.peicheng0413.flexpomodoro.data.DEFAULT_DAILY_MINUTES
 import io.github.peicheng0413.flexpomodoro.data.DEFAULT_WEEKLY_DAYS
+import io.github.peicheng0413.flexpomodoro.data.DayMarkEntity
 import io.github.peicheng0413.flexpomodoro.data.HabitEntity
 import io.github.peicheng0413.flexpomodoro.data.HabitGoalEntity
 import io.github.peicheng0413.flexpomodoro.data.SegmentEntity
@@ -73,20 +74,39 @@ const val LEVEL_LOW = 1
 const val LEVEL_HIGH = 2
 const val LEVEL_DONE = 3
 
-/** 一個習慣到今天為止的進度。daily 已包含進行中專注的部分。 */
+/** 手動標記：有做未達標（淺綠）、達標（深綠）。 */
+enum class Mark { PARTIAL, DONE }
+
+/**
+ * 點週曆的下一個狀態，只能往上加：計時紀錄是事實，不能被點掉。
+ * - 原狀沒做：原狀 → 有做 → 達標 → 原狀
+ * - 原狀有做但未達標：原狀 → 達標 → 原狀
+ * - 計時已達標：不變
+ * 回傳 null 表示清掉標記、恢復原狀。
+ */
+fun nextMark(timedLevel: Int, current: Mark?): Mark? = when {
+    timedLevel >= LEVEL_DONE -> current
+    current == null -> if (timedLevel == LEVEL_NONE) Mark.PARTIAL else Mark.DONE
+    current == Mark.PARTIAL -> Mark.DONE
+    else -> null
+}
+
+/** 一個習慣到今天為止的進度。daily 已包含進行中專注的部分；marks 是手動標記。 */
 class HabitProgress(
     val habit: HabitEntity,
     val goals: GoalHistory,
     val daily: DailyWork,
     val today: LocalDate,
+    val marks: Map<LocalDate, Mark> = emptyMap(),
 ) {
     fun workMs(date: LocalDate): Long = daily[date] ?: 0
 
     fun goal(date: LocalDate): Goal = goals.at(date)
 
-    fun done(date: LocalDate): Boolean = workMs(date) >= goal(date).dailyMs
+    fun done(date: LocalDate): Boolean = timedLevel(date) == LEVEL_DONE || marks[date] == Mark.DONE
 
-    fun level(date: LocalDate): Int {
+    /** 只看計時紀錄的色階。 */
+    fun timedLevel(date: LocalDate): Int {
         val work = workMs(date)
         val target = goal(date).dailyMs
         return when {
@@ -96,6 +116,19 @@ class HabitProgress(
             else -> LEVEL_LOW
         }
     }
+
+    /** 畫面上的色階：計時紀錄與手動標記取較高的。 */
+    fun level(date: LocalDate): Int = maxOf(
+        timedLevel(date),
+        when (marks[date]) {
+            Mark.DONE -> LEVEL_DONE
+            Mark.PARTIAL -> LEVEL_LOW
+            null -> LEVEL_NONE
+        },
+    )
+
+    /** 點週曆後要存的標記。 */
+    fun markAfterTap(date: LocalDate): Mark? = nextMark(timedLevel(date), marks[date])
 
     fun daysDone(weekStart: LocalDate): Int =
         (0L until 7L).map { weekStart.plusDays(it) }.count { !it.isAfter(today) && done(it) }
@@ -131,7 +164,7 @@ fun overviewLevel(progress: List<HabitProgress>, date: LocalDate): Int {
     return when {
         done == progress.size -> LEVEL_DONE
         done > 0 -> LEVEL_HIGH
-        progress.any { it.workMs(date) > 0 } -> LEVEL_LOW
+        progress.any { it.level(date) > LEVEL_NONE } -> LEVEL_LOW
         else -> LEVEL_NONE
     }
 }
@@ -143,16 +176,20 @@ fun buildProgress(
     habits: List<HabitEntity>,
     goalRows: List<HabitGoalEntity>,
     endedDaily: Map<Long?, DailyWork>,
+    markRows: List<DayMarkEntity>,
     active: TimerSnapshot?,
     now: Long,
     zone: ZoneId,
 ): List<HabitProgress> {
     val today = now.toLocalDate(zone)
     val goalsByHabit = goalRows.groupBy { it.habitId }
+    val marksByHabit = markRows.groupBy { it.habitId }.mapValues { (_, rows) ->
+        rows.associate { LocalDate.ofEpochDay(it.day) to if (it.done) Mark.DONE else Mark.PARTIAL }
+    }
     val activeDaily = active?.let { dailyWorkMs(it.segments, now, zone) }.orEmpty()
     return habits.map { h ->
         val ended = endedDaily[h.id].orEmpty()
         val daily = if (active?.session?.habitId == h.id) ended.sumWith(activeDaily) else ended
-        HabitProgress(h, GoalHistory(goalsByHabit[h.id].orEmpty()), daily, today)
+        HabitProgress(h, GoalHistory(goalsByHabit[h.id].orEmpty()), daily, today, marksByHabit[h.id].orEmpty())
     }
 }

@@ -12,6 +12,9 @@ import io.github.peicheng0413.flexpomodoro.habit.LEVEL_DONE
 import io.github.peicheng0413.flexpomodoro.habit.LEVEL_HIGH
 import io.github.peicheng0413.flexpomodoro.habit.LEVEL_LOW
 import io.github.peicheng0413.flexpomodoro.habit.LEVEL_NONE
+import io.github.peicheng0413.flexpomodoro.habit.Mark
+import io.github.peicheng0413.flexpomodoro.habit.nextMark
+import io.github.peicheng0413.flexpomodoro.data.DayMarkEntity
 import io.github.peicheng0413.flexpomodoro.habit.buildProgress
 import io.github.peicheng0413.flexpomodoro.habit.dailyWorkMs
 import io.github.peicheng0413.flexpomodoro.habit.overviewLevel
@@ -146,11 +149,65 @@ class HabitLogicTest {
             habits = listOf(habit, other),
             goalRows = emptyList(),
             endedDaily = mapOf(1L to mapOf(today to 10 * min)),
+            markRows = emptyList(),
             active = active,
             now = start + 25 * min,
             zone = zone,
         )
         assertEquals(35 * min, result[0].workMs(today))
         assertEquals(0, result[1].workMs(today))
+    }
+
+    @Test
+    fun tapCycleOnlyGoesUp() {
+        // 原狀沒做：原狀 → 有做 → 達標 → 原狀
+        assertEquals(Mark.PARTIAL, nextMark(LEVEL_NONE, null))
+        assertEquals(Mark.DONE, nextMark(LEVEL_NONE, Mark.PARTIAL))
+        assertEquals(null, nextMark(LEVEL_NONE, Mark.DONE))
+        // 計時有做但未達標：原狀 → 達標 → 原狀
+        assertEquals(Mark.DONE, nextMark(LEVEL_LOW, null))
+        assertEquals(Mark.DONE, nextMark(LEVEL_HIGH, null))
+        assertEquals(null, nextMark(LEVEL_HIGH, Mark.DONE))
+        // 計時已達標：點了不變
+        assertEquals(null, nextMark(LEVEL_DONE, null))
+        assertEquals(Mark.DONE, nextMark(LEVEL_DONE, Mark.DONE))
+    }
+
+    @Test
+    fun marksRaiseLevelAndCountTowardWeek() {
+        val monday = today.weekStart()
+        val p = HabitProgress(
+            habit, GoalHistory(listOf(HabitGoalEntity(1, 0, 30, 3))),
+            daily = mapOf(monday to 20 * min, monday.plusDays(1) to 40 * min),
+            today = today,
+            marks = mapOf(monday to Mark.DONE, monday.plusDays(2) to Mark.PARTIAL),
+        )
+        // 標記達標：亮深綠、算達成，但不灌分鐘數
+        assertEquals(LEVEL_DONE, p.level(monday))
+        assertTrue(p.done(monday))
+        assertEquals(20 * min, p.workMs(monday))
+        // 標記有做：淺綠、不算達成
+        assertEquals(LEVEL_LOW, p.level(monday.plusDays(2)))
+        assertFalse(p.done(monday.plusDays(2)))
+        // 一天手動達標＋一天計時達標＝本週 2 天
+        assertEquals(2, p.daysDone(monday))
+        assertEquals(Mark.DONE, p.markAfterTap(monday.plusDays(2)))
+    }
+
+    @Test
+    fun markRowsAreAttachedToTheirHabit() {
+        val result = buildProgress(
+            habits = listOf(habit, habit.copy(id = 2, name = "運動")),
+            goalRows = emptyList(),
+            endedDaily = emptyMap(),
+            markRows = listOf(DayMarkEntity(2, today.toEpochDay(), true)),
+            active = null,
+            now = at(2026, 10, 14, 12, 0),
+            zone = zone,
+        )
+        assertFalse(result[0].done(today))
+        assertTrue(result[1].done(today))
+        // 兩個習慣達成一個＝達成部分
+        assertEquals(LEVEL_HIGH, overviewLevel(result, today))
     }
 }

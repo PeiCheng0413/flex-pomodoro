@@ -66,6 +66,17 @@ data class HabitGoalEntity(
     val weeklyDays: Int,
 )
 
+/**
+ * 手動標記：沒計時但有做的日子，在週曆上點出來。day 是 LocalDate.toEpochDay。
+ * done = false 是「有做未達標」，true 是「達標」。只會讓那天的狀態往上加，不會灌分鐘數。
+ */
+@Entity(tableName = "day_marks", primaryKeys = ["habitId", "day"])
+data class DayMarkEntity(
+    val habitId: Long,
+    val day: Long,
+    val done: Boolean,
+)
+
 @Dao
 interface SessionDao {
     @Query("SELECT * FROM sessions WHERE endedAt IS NULL LIMIT 1")
@@ -158,11 +169,26 @@ interface HabitDao {
 
     @Query("DELETE FROM habit_goals WHERE habitId = :habitId")
     suspend fun deleteGoals(habitId: Long)
+
+    @Query("SELECT * FROM day_marks ORDER BY habitId, day")
+    fun observeMarks(): Flow<List<DayMarkEntity>>
+
+    @Query("SELECT * FROM day_marks ORDER BY habitId, day")
+    suspend fun getMarks(): List<DayMarkEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMark(mark: DayMarkEntity)
+
+    @Query("DELETE FROM day_marks WHERE habitId = :habitId AND day = :day")
+    suspend fun deleteMark(habitId: Long, day: Long)
+
+    @Query("DELETE FROM day_marks WHERE habitId = :habitId")
+    suspend fun deleteMarks(habitId: Long)
 }
 
 @Database(
-    entities = [SessionEntity::class, SegmentEntity::class, HabitEntity::class, HabitGoalEntity::class],
-    version = 3,
+    entities = [SessionEntity::class, SegmentEntity::class, HabitEntity::class, HabitGoalEntity::class, DayMarkEntity::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -181,7 +207,7 @@ abstract class AppDatabase : RoomDatabase() {
                         insertDefaultGoals(db)
                     }
                 })
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
 
         /** 休息比例從「除數」改成「百分比」：÷5 → 20%。 */
@@ -222,6 +248,16 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("UPDATE sessions SET habitId = (SELECT id FROM habits WHERE habits.name = sessions.name) WHERE name != ''")
                 insertDefaultGoals(db)
+            }
+        }
+
+        /** 新增手動標記表（週曆點擊）。 */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `day_marks` (`habitId` INTEGER NOT NULL, `day` INTEGER NOT NULL, " +
+                        "`done` INTEGER NOT NULL, PRIMARY KEY(`habitId`, `day`))"
+                )
             }
         }
 

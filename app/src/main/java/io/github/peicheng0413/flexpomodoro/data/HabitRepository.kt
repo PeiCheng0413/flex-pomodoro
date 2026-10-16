@@ -3,6 +3,7 @@ package io.github.peicheng0413.flexpomodoro.data
 import androidx.room.withTransaction
 import io.github.peicheng0413.flexpomodoro.habit.Goal
 import io.github.peicheng0413.flexpomodoro.habit.GoalHistory
+import io.github.peicheng0413.flexpomodoro.habit.Mark
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 
@@ -13,6 +14,13 @@ class HabitRepository(private val db: AppDatabase) {
     /** 全部習慣，包含已封存的。 */
     val habits: Flow<List<HabitEntity>> = dao.observeAll()
     val goals: Flow<List<HabitGoalEntity>> = dao.observeGoals()
+    val marks: Flow<List<DayMarkEntity>> = dao.observeMarks()
+
+    /** 設定某天的手動標記，null 表示清掉、恢復原狀。 */
+    suspend fun setMark(habitId: Long, date: LocalDate, mark: Mark?) {
+        if (mark == null) dao.deleteMark(habitId, date.toEpochDay())
+        else dao.upsertMark(DayMarkEntity(habitId, date.toEpochDay(), mark == Mark.DONE))
+    }
 
     /** 新增習慣，目標從最早的日子就生效。同名已存在時回傳 null。 */
     suspend fun create(name: String, breakPercent: Int, goal: Goal): HabitEntity? = db.withTransaction {
@@ -51,6 +59,13 @@ class HabitRepository(private val db: AppDatabase) {
     suspend fun merge(from: Long, into: Long) = db.withTransaction {
         if (from == into) return@withTransaction
         sessions.moveAll(from, into)
+        // 手動標記也搬過去，同一天兩邊都有時取較高的
+        val targetMarks = dao.getMarks().filter { it.habitId == into }.associateBy { it.day }
+        dao.getMarks().filter { it.habitId == from }.forEach { m ->
+            val done = m.done || targetMarks[m.day]?.done == true
+            dao.upsertMark(DayMarkEntity(into, m.day, done))
+        }
+        dao.deleteMarks(from)
         dao.deleteGoals(from)
         dao.delete(from)
     }

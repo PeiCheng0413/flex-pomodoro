@@ -153,10 +153,15 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         AlertDialog(
             onDismissRequest = { importPlan = null },
             title = { Text("匯入資料") },
-            text = { Text("將新增 ${plan.newSessions.size} 筆紀錄、${plan.newHabits.size} 個習慣。") },
+            text = {
+                Text(
+                    "將新增 ${plan.newSessions.size} 筆紀錄、${plan.newHabits.size} 個習慣" +
+                        (if (plan.newMarks.isNotEmpty()) "、${plan.newMarks.size} 個手動標記" else "") + "。"
+                )
+            },
             confirmButton = {
                 TextButton(
-                    enabled = plan.newSessions.isNotEmpty() || plan.newHabits.isNotEmpty(),
+                    enabled = plan.newSessions.isNotEmpty() || plan.newHabits.isNotEmpty() || plan.newMarks.isNotEmpty(),
                     onClick = {
                         importPlan = null
                         scope.launch {

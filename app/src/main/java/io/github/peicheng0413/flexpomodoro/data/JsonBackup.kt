@@ -9,6 +9,7 @@ import java.time.LocalDate
  * 匯出／匯入 JSON。匯入採合併：紀錄以 id 去重，習慣同名跳過（不覆蓋現有目標）。只處理已結束的專注。
  * 檔案裡用習慣名稱串起紀錄與習慣，因為各台手機的習慣 id 不同。
  * version 1（模板時代）的檔案也能匯入：模板變成習慣、紀錄依名稱歸類。
+ * version 3 加上手動標記（marks），已經有標記的那天跳過。
  */
 class JsonBackup(private val db: AppDatabase) {
     private val sessions = db.sessionDao()
@@ -21,9 +22,15 @@ class JsonBackup(private val db: AppDatabase) {
     /** habitName 為 null 表示未歸類。 */
     data class ParsedSession(val session: SessionEntity, val habitName: String?, val segments: List<SegmentEntity>)
 
-    data class Parsed(val habits: List<ParsedHabit>, val sessions: List<ParsedSession>)
+    data class ParsedMark(val habitName: String, val day: Long, val done: Boolean)
 
-    data class ImportPlan(val newHabits: List<ParsedHabit>, val newSessions: List<ParsedSession>)
+    data class Parsed(val habits: List<ParsedHabit>, val sessions: List<ParsedSession>, val marks: List<ParsedMark>)
+
+    data class ImportPlan(
+        val newHabits: List<ParsedHabit>,
+        val newSessions: List<ParsedSession>,
+        val newMarks: List<ParsedMark>,
+    )
 
     suspend fun export(): String {
         val segs = sessions.getEndedSegments().groupBy { it.sessionId }
@@ -32,7 +39,7 @@ class JsonBackup(private val db: AppDatabase) {
         val goals = habits.getGoals().groupBy { it.habitId }
         val root = JSONObject()
             .put("format", "flex-pomodoro")
-            .put("version", 2)
+            .put("version", 3)
             .put("exportedAt", System.currentTimeMillis())
             .put("habits", JSONArray().apply {
                 allHabits.forEach { h ->
@@ -48,6 +55,16 @@ class JsonBackup(private val db: AppDatabase) {
                                     .put("weeklyDays", g.weeklyDays))
                             }
                         }))
+                }
+            })
+            .put("marks", JSONArray().apply {
+                habits.getMarks().forEach { m ->
+                    names[m.habitId]?.let { name ->
+                        put(JSONObject()
+                            .put("habit", name)
+                            .put("date", LocalDate.ofEpochDay(m.day).toString())
+                            .put("done", m.done))
+                    }
                 }
             })
             .put("sessions", JSONArray().apply {
@@ -83,7 +100,12 @@ class JsonBackup(private val db: AppDatabase) {
         // version 1 叫 templates，沒有目標
         val hab = root.optJSONArray(if (legacy) "templates" else "habits") ?: JSONArray()
         val ses = root.optJSONArray("sessions") ?: JSONArray()
+        val marks = root.optJSONArray("marks") ?: JSONArray()
         return Parsed(
+            marks = (0 until marks.length()).map { i ->
+                val o = marks.getJSONObject(i)
+                ParsedMark(o.getString("habit").trim(), LocalDate.parse(o.getString("date")).toEpochDay(), o.getBoolean("done"))
+            },
             habits = (0 until hab.length()).map { i ->
                 val o = hab.getJSONObject(i)
                 val goals = o.optJSONArray("goals") ?: JSONArray()
@@ -151,9 +173,15 @@ class JsonBackup(private val db: AppDatabase) {
         // 紀錄用到、但檔案裡沒列出的習慣（version 1 常見），用預設目標補建
         val referenced = newSessions.mapNotNull { it.habitName }.filter { n -> listed.none { it.name == n } }
             .map { n -> ParsedHabit(n, newSessions.first { it.habitName == n }.session.breakPercent, false, emptyList()) }
+        val idToName = habits.getAll().associate { it.id to it.name }
+        val existingMarks = habits.getMarks().mapNotNull { m -> idToName[m.habitId]?.let { it to m.day } }.toSet()
+        // 標記指到的習慣如果兩邊都沒有，就不匯入那筆標記
+        val knownNames = existingNames + listed.map { it.name } + referenced.map { it.name }
         return ImportPlan(
             newHabits = (listed + referenced).filter { it.name !in existingNames }.distinctBy { it.name },
             newSessions = newSessions,
+            newMarks = parsed.marks.filter { it.habitName in knownNames && (it.habitName to it.day) !in existingMarks }
+                .distinctBy { it.habitName to it.day },
         )
     }
 
@@ -168,6 +196,9 @@ class JsonBackup(private val db: AppDatabase) {
         plan.newSessions.forEach { (s, habitName, segs) ->
             sessions.insertSession(s.copy(habitId = habitName?.let { ids[it] }))
             sessions.insertSegments(segs)
+        }
+        plan.newMarks.forEach { m ->
+            ids[m.habitName]?.let { habits.upsertMark(DayMarkEntity(it, m.day, m.done)) }
         }
     }
 }
